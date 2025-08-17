@@ -1,0 +1,14 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build",
+            "type": "shell",
+            "command": "jai -import_dir ${workspaceFolder}/Modules -import_dir ${workspaceFolder}/Source/Modules ${workspaceFolder}/Build.jai",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+        }
+    ]
+}

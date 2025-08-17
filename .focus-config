@@ -1,0 +1,29 @@
+[23]  # Version number. Do not delete.
+[[workspace]]
+/  # <- this would be relative to the config file location
+
+[[build commands]]
+run_working_dir:        %PROJECT_CONFIG_DIR%
+open_panel_on_build:    true
+close_panel_on_success: true
+clear_build_output_before_running: true
+timeout_in_seconds:     -1
+error_regex:            ^(?P<file>.*):(?P<line>\d+),(?P<col>\d+): (?P<type>Error|Warning|Info|...):* (?P<msg>.*)|^(?P<msg1>.*error LNK.*)
+auto_jump_to_error:     false
+
+[Debug Check]
+build_command:          jai -import_dir %RUN_WORKING_DIR%/Modules -import_dir %RUN_WORKING_DIR%/Source/Modules %RUN_WORKING_DIR%\Build.jai
+key_binding:            F5
+
+[Debug Build and Run]
+build_command:          jai -import_dir %RUN_WORKING_DIR%/Modules -import_dir %RUN_WORKING_DIR%/Source/Modules %RUN_WORKING_DIR%\Build.jai
+run_command:            %RUN_WORKING_DIR%\Vk.exe
+key_binding:            Ctrl-F5
+
+[Debug Run]
+run_command:            %RUN_WORKING_DIR%\Vk.exe
+key_binding:            Ctrl-Shift-F5
+
+[Release]
+build_command:          jai -import_dir %RUN_WORKING_DIR%/Modules -import_dir %RUN_WORKING_DIR%/Source/Modules %RUN_WORKING_DIR%\Build.jai -release
+key_binding:            Ctrl-F9
