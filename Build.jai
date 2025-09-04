@@ -16,6 +16,8 @@ String :: #import "String";
 #load "Source/Build/asset.jai";
 #load "Source/Build/shader_codegen.jai";
 #load "Source/Build/renderer.jai";
+#load "Source/Build/editor.jai";
+#load "Source/Build/profiler.jai";
 
 Default_Plugins :: string.[
     "Check(CHECK_BINDINGS=false)",
@@ -33,6 +35,8 @@ g_report_all_undeclared_identifiers := false;
 g_verbose_tests := false;
 g_execute_tests := true;
 g_tests_to_execute : [..]string;
+
+g_show_compiler_stats := false;
 
 g_generated_runtime_tests_code := false;
 g_runtime_tests : [..]string;
@@ -81,6 +85,8 @@ GetRootDirectory :: inline () -> string {
 }
 
 HandleCompilerMessage :: (msg : *Message) {
+    HandleCompilerMessageForProfiling(msg);
+
     if msg.kind == {
     case .ERROR;
         if g_report_all_undeclared_identifiers {
@@ -107,6 +113,7 @@ HandleCompilerMessage :: (msg : *Message) {
             HandleDeclarationForAsset(decl);
             HandleDeclarationForRenderer(decl);
             HandleDeclarationForShaderCodegen(decl);
+            HandleDeclarationForEditor(decl);
         }
 
         if g_execute_tests {
@@ -133,6 +140,7 @@ HandleCompilerMessage :: (msg : *Message) {
             GenerateEntityCode(msg.workspace);
             GenerateAssetCode(msg.workspace);
             GenerateRendererCode(msg.workspace);
+            GenerateEditorCode(msg.workspace);
 
             if !g_generated_runtime_tests_code {
                 defer {
@@ -235,6 +243,9 @@ Build :: () {
         case "-verbose_error";
             g_report_all_undeclared_identifiers = true;
 
+        case "-compiler_stats";
+            g_show_compiler_stats = true;
+
         case;
             LogError("Unknown argument '%'.", args[arg_index]);
             arg_error = true;
@@ -277,6 +288,9 @@ Build :: () {
     options.write_added_strings = true;
     options.stack_trace = true;
     options.text_output_flags = 0;
+    if g_show_compiler_stats {
+        options.text_output_flags = .OUTPUT_TIMING_INFO;
+    }
 
     #if OS == .LINUX {
         #import "POSIX";

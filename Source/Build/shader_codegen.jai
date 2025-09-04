@@ -1,3 +1,5 @@
+// @Todo: make sure constants in unnamed structs always get generated in the same order
+
 #import "Linalg";
 
 g_shader_types : [..]*Type_Info;
@@ -69,7 +71,6 @@ GetMatrixTypeInfoByName :: (info : *Type_Info) -> is_matrix_type : bool, T : *Ty
     return true, T, M, N;
 }
 
-
 HandleDeclarationForShaderCodegen :: (decl : *Code_Declaration) {
     has_shader_type_note := false;
     for note : decl.notes {
@@ -107,6 +108,15 @@ GenerateShaderCode :: (workspace : Workspace) {
     ArrayClear(*g_shader_types);
 }
 
+#scope_file
+
+StructAndMember :: struct {
+    struct_info : *Type_Info_Struct;
+    member : *Type_Info_Struct_Member;
+}
+
+#scope_export
+
 GenerateGLSLShaderCode :: (workspace : Workspace) {
     // Make sure types are generated in order to respect C declaration rules
     PushType :: (types : *[..]*Type_Info, type : *Type_Info) {
@@ -134,6 +144,27 @@ GenerateGLSLShaderCode :: (workspace : Workspace) {
     }
 
     shader_types_in_order : [..]*Type_Info;
+    shader_constants : [..]StructAndMember;
+
+    for g_shader_types {
+        if it.type != .STRUCT {
+            continue;
+        }
+
+        for * member : cast(*Type_Info_Struct, it).members {
+            if !(member.flags & .CONSTANT) || member.offset_into_constant_storage < 0 {
+                continue;
+            }
+
+            if member.name == "_" || !member.name {
+                continue;
+            }
+
+            ArrayPush(*shader_constants, .{struct_info=xx it, member=member});
+        }
+    }
+
+    QuickSort(shader_constants, (a, b) => StringCompare(a.member.name, b.member.name));
 
     for g_shader_types {
         PushType(*shader_types_in_order, it);
@@ -150,13 +181,22 @@ GenerateGLSLShaderCode :: (workspace : Workspace) {
     Appendln(*builder, "#ifndef SHADER_TYPES_GENERATED_GLSL");
     Appendln(*builder, "#define SHADER_TYPES_GENERATED_GLSL\n");
 
+    for shader_constants {
+        GenerateGLSLConstant(*builder, it);
+    }
+
+    if shader_constants.count > 0 {
+        Append(*builder, "\n");
+    }
+
     for shader_types_in_order {
         if it.type == .ENUM {
             GenerateGLSLEnumDefinition(*builder, xx it);
             Append(*builder, "\n");
         } else if it.type == .STRUCT {
-            GenerateGLSLStructDefinition(*builder, xx it);
-            Append(*builder, ";\n\n");
+            if GenerateGLSLStructDefinition(*builder, xx it) {
+                Append(*builder, ";\n\n");
+            }
         }
     }
 
@@ -263,8 +303,51 @@ AppendGLSLTypePostfix :: (builder : *StringBuilder, info : *Type_Info, indent :=
     }
 }
 
-GenerateGLSLStructDefinition :: (builder : *StringBuilder, info : *Type_Info_Struct, indent := 0) {
-    if info.name {
+GenerateGLSLConstant :: (builder : *StringBuilder, using struct_and_member : StructAndMember) {
+    ptr := struct_info.constant_storage.data + member.offset_into_constant_storage;
+
+    if member.type.type == {
+    case .BOOL;
+        Appendln(builder, "#define % %", member.name, cast(*u8, ptr).*);
+    case .FLOAT;
+        if member.type.runtime_size == {
+        case 4; Appendln(builder, "#define % %", member.name, cast(*float32, ptr).*);
+        case 8; Appendln(builder, "#define % %", member.name, cast(*float64, ptr).*);
+        }
+    case .INTEGER;
+        info_int := cast(*Type_Info_Integer, member.type);
+        if info_int.signed {
+            if info_int.runtime_size == {
+            case 1; Appendln(builder, "#define % %", member.name, cast(*s8, ptr).*);
+            case 2; Appendln(builder, "#define % %", member.name, cast(*s16, ptr).*);
+            case 4; Appendln(builder, "#define % %", member.name, cast(*s32, ptr).*);
+            case 8; Appendln(builder, "#define % %", member.name, cast(*s64, ptr).*);
+            }
+        } else {
+            if info_int.runtime_size == {
+            case 1; Appendln(builder, "#define % %", member.name, cast(*u8, ptr).*);
+            case 2; Appendln(builder, "#define % %", member.name, cast(*u16, ptr).*);
+            case 4; Appendln(builder, "#define % %", member.name, cast(*u32, ptr).*);
+            case 8; Appendln(builder, "#define % %", member.name, cast(*u64, ptr).*);
+            }
+        }
+    }
+}
+
+GenerateGLSLStructDefinition :: (builder : *StringBuilder, info : *Type_Info_Struct, indent := 0) -> bool {
+    found_non_constant_members := false;
+    for info.members {
+        if !(it.flags & .CONSTANT) {
+            found_non_constant_members = true;
+            break;
+        }
+    }
+
+    if !found_non_constant_members {
+        return false;
+    }
+
+    if info.name && info.name != "_" {
         Appendln(builder, "struct % {", RemoveShaderPrefix(info.name));
     } else {
         Appendln(builder, "struct {");
@@ -293,4 +376,6 @@ GenerateGLSLStructDefinition :: (builder : *StringBuilder, info : *Type_Info_Str
     }
 
     Append(builder, "}");
+
+    return true;
 }

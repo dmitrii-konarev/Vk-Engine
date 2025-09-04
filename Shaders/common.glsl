@@ -24,14 +24,25 @@
 
 #include "shader_types.generated.glsl"
 
-#define Max_Shadow_Maps 2
-#define Max_Point_Shadow_Maps 20
-
 #define DECLARE_STATIC_VERTEX_ATTRIBUTES() \
     layout(location=0) in float3 in_position; \
     layout(location=1) in float3 in_normal; \
     layout(location=2) in float4 in_tangent; \
     layout(location=3) in float2 in_tex_coords
+
+#define DECLARE_SKINNED_VERTEX_ATTRIBUTES() \
+    layout(location=0) in float3 in_position; \
+    layout(location=1) in float3 in_normal; \
+    layout(location=2) in float4 in_tangent; \
+    layout(location=3) in float2 in_tex_coords; \
+    layout(location=4) in int4 in_joint_ids; \
+    layout(location=5) in float3 in_joint_weights
+
+#ifdef HAS_SKIN
+#define DECLARE_VERTEX_ATTRIBUTES() DECLARE_SKINNED_VERTEX_ATTRIBUTES()
+#else
+#define DECLARE_VERTEX_ATTRIBUTES() DECLARE_STATIC_VERTEX_ATTRIBUTES()
+#endif
 
 #ifdef SHADER_STAGE_VERTEX
 #define DECLARE_PER_FRAME_PARAMS() \
@@ -59,10 +70,14 @@
 #define DECLARE_PER_FRAME_PARAMS() \
     layout(set=0, binding=0, std140) uniform FrameData { \
         FrameInfo u_frame_info; \
+    }; \
+    layout(set=0, binding=1, std430) readonly buffer DirectionalLights { \
+        DirectionalLight u_directional_lights[]; \
+    }; \
+    layout(set=0, binding=2, std430) readonly buffer PointLights { \
+        PointLight u_point_lights[]; \
     }
 #endif
-
-#define Max_Viewpoints 6
 
 #ifdef SHADER_STAGE_VERTEX
 #define DECLARE_FORWARD_PASS_PARAMS() \
@@ -81,13 +96,19 @@
     layout(set=1, binding=1) uniform sampler2DArrayShadow u_shadow_maps[Max_Shadow_Maps]; \
     layout(set=1, binding=2) uniform samplerCube u_point_shadow_maps[Max_Point_Shadow_Maps]; \
     layout(set=1, binding=3) uniform sampler2D u_irradiance_map; \
-    layout(set=1, binding=4) uniform sampler2D u_environment_map
+    layout(set=1, binding=4) uniform sampler2D u_environment_map; \
+    layout(set=1, binding=5) readonly buffer Clusters { \
+        LightCluster u_clusters[]; \
+    }
 #endif
 
 #ifdef SHADER_STAGE_VERTEX
 #define DECLARE_PER_DRAW_CALL_MESH_PARAMS() \
     layout(set=2, binding=0, std430) readonly buffer MeshData { \
         MeshInstance u_mesh_instances[]; \
+    }; \
+    layout(set=2, binding=1, std430) readonly buffer SkinningData { \
+        float4x4 u_skinning_matrices[]; \
     }
 #endif
 
@@ -96,11 +117,11 @@
     layout(set=2, binding=0, std430) readonly buffer MeshData { \
         MeshInstance u_mesh_instances[]; \
     }; \
-    layout(set=2, binding=1) uniform sampler2D u_base_color_texture; \
-    layout(set=2, binding=2) uniform sampler2D u_normal_map_texture; \
-    layout(set=2, binding=3) uniform sampler2D u_metallic_roughness_map_texture; \
-    layout(set=2, binding=4) uniform sampler2D u_emissive_texture; \
-    layout(set=2, binding=5) uniform sampler2D u_depth_map_texture
+    layout(set=2, binding=2) uniform sampler2D u_base_color_texture; \
+    layout(set=2, binding=3) uniform sampler2D u_normal_map_texture; \
+    layout(set=2, binding=4) uniform sampler2D u_metallic_roughness_map_texture; \
+    layout(set=2, binding=5) uniform sampler2D u_emissive_texture; \
+    layout(set=2, binding=6) uniform sampler2D u_depth_map_texture
 #endif
 
 #define Pi 3.14159265359
@@ -250,19 +271,19 @@ float3 SphericalToCartesian(float azimuth, float polar) {
 // . K . L . M .
 // . . . . . . .
 float4 DownsampleBox13(sampler2D s, float2 uv, float2 texel_size) {
-    float4 A = texture(s, uv + texel_size * 2 * float2(-1.0, -1.0));
-    float4 B = texture(s, uv + texel_size * 2 * float2( 0.0, -1.0));
-    float4 C = texture(s, uv + texel_size * 2 * float2( 1.0, -1.0));
-    float4 D = texture(s, uv + texel_size * 2 * float2(-0.5, -0.5));
-    float4 E = texture(s, uv + texel_size * 2 * float2( 0.5, -0.5));
-    float4 F = texture(s, uv + texel_size * 2 * float2(-1.0,  0.0));
-    float4 G = texture(s, uv);
-    float4 H = texture(s, uv + texel_size * 2 * float2( 1.0,  0.0));
-    float4 I = texture(s, uv + texel_size * 2 * float2(-0.5,  0.5));
-    float4 J = texture(s, uv + texel_size * 2 * float2( 0.5,  0.5));
-    float4 K = texture(s, uv + texel_size * 2 * float2(-1.0,  1.0));
-    float4 L = texture(s, uv + texel_size * 2 * float2( 0.0,  1.0));
-    float4 M = texture(s, uv + texel_size * 2 * float2( 1.0,  1.0));
+    float4 A = textureLod(s, uv + texel_size * float2(-2, -2), 0);
+    float4 B = textureLod(s, uv + texel_size * float2( 0, -2), 0);
+    float4 C = textureLod(s, uv + texel_size * float2( 2, -2), 0);
+    float4 D = textureLod(s, uv + texel_size * float2(-1, -1), 0);
+    float4 E = textureLod(s, uv + texel_size * float2( 1, -1), 0);
+    float4 F = textureLod(s, uv + texel_size * float2(-2,  0), 0);
+    float4 G = textureLod(s, uv, 0);
+    float4 H = textureLod(s, uv + texel_size * float2( 2,  0), 0);
+    float4 I = textureLod(s, uv + texel_size * float2(-1,  1), 0);
+    float4 J = textureLod(s, uv + texel_size * float2( 1,  1), 0);
+    float4 K = textureLod(s, uv + texel_size * float2(-2,  2), 0);
+    float4 L = textureLod(s, uv + texel_size * float2( 0,  2), 0);
+    float4 M = textureLod(s, uv + texel_size * float2( 2,  2), 0);
 
     float4 result = G * 0.125;
     result += (A + C + M + K) * 0.03125;
@@ -279,7 +300,7 @@ float4 DownsampleBox13(readonly image2D i, int2 uv, int2 image_size) {
     float4 D = imageLoad(i, clamp(uv + int2(-1, -1), int2(0), image_size - int2(1)));
     float4 E = imageLoad(i, clamp(uv + int2( 1, -1), int2(0), image_size - int2(1)));
     float4 F = imageLoad(i, clamp(uv + int2(-2,  0), int2(0), image_size - int2(1)));
-    float4 G = imageLoad(i, clamp(uv, int2(0), image_size - int2(1)));
+    float4 G = imageLoad(i, clamp(uv,                int2(0), image_size - int2(1)));
     float4 H = imageLoad(i, clamp(uv + int2( 2,  0), int2(0), image_size - int2(1)));
     float4 I = imageLoad(i, clamp(uv + int2(-1,  1), int2(0), image_size - int2(1)));
     float4 J = imageLoad(i, clamp(uv + int2( 1,  1), int2(0), image_size - int2(1)));
@@ -309,19 +330,19 @@ float KarisAverage(float3 color) {
 // . K . L . M .
 // . . . . . . .
 float4 DownsampleBox13WithKarisAverage(sampler2D s, float2 uv, float2 texel_size) {
-    float4 A = texture(s, uv + texel_size * 2 * float2(-1.0, -1.0));
-    float4 B = texture(s, uv + texel_size * 2 * float2( 0.0, -1.0));
-    float4 C = texture(s, uv + texel_size * 2 * float2( 1.0, -1.0));
-    float4 D = texture(s, uv + texel_size * 2 * float2(-0.5, -0.5));
-    float4 E = texture(s, uv + texel_size * 2 * float2( 0.5, -0.5));
-    float4 F = texture(s, uv + texel_size * 2 * float2(-1.0,  0.0));
-    float4 G = texture(s, uv);
-    float4 H = texture(s, uv + texel_size * 2 * float2( 1.0,  0.0));
-    float4 I = texture(s, uv + texel_size * 2 * float2(-0.5,  0.5));
-    float4 J = texture(s, uv + texel_size * 2 * float2( 0.5,  0.5));
-    float4 K = texture(s, uv + texel_size * 2 * float2(-1.0,  1.0));
-    float4 L = texture(s, uv + texel_size * 2 * float2( 0.0,  1.0));
-    float4 M = texture(s, uv + texel_size * 2 * float2( 1.0,  1.0));
+    float4 A = textureLod(s, uv + texel_size * float2(-2, -2), 0);
+    float4 B = textureLod(s, uv + texel_size * float2( 0, -2), 0);
+    float4 C = textureLod(s, uv + texel_size * float2( 2, -2), 0);
+    float4 D = textureLod(s, uv + texel_size * float2(-1, -1), 0);
+    float4 E = textureLod(s, uv + texel_size * float2( 1, -1), 0);
+    float4 F = textureLod(s, uv + texel_size * float2(-2,  0), 0);
+    float4 G = textureLod(s, uv, 0);
+    float4 H = textureLod(s, uv + texel_size * float2( 2,  0), 0);
+    float4 I = textureLod(s, uv + texel_size * float2(-1,  1), 0);
+    float4 J = textureLod(s, uv + texel_size * float2( 1,  1), 0);
+    float4 K = textureLod(s, uv + texel_size * float2(-2,  2), 0);
+    float4 L = textureLod(s, uv + texel_size * float2( 0,  2), 0);
+    float4 M = textureLod(s, uv + texel_size * float2( 2,  2), 0);
 
     float4 G1 = (A + B + F + G) * (0.125 / 4);
     float4 G2 = (B + C + G + H) * (0.125 / 4);
@@ -344,7 +365,7 @@ float4 DownsampleBox13WithKarisAverage(readonly image2D i, int2 uv, int2 image_s
     float4 D = imageLoad(i, clamp(uv + int2(-1, -1), int2(0), image_size - int2(1)));
     float4 E = imageLoad(i, clamp(uv + int2( 1, -1), int2(0), image_size - int2(1)));
     float4 F = imageLoad(i, clamp(uv + int2(-2,  0), int2(0), image_size - int2(1)));
-    float4 G = imageLoad(i, clamp(uv, int2(0), image_size - int2(1)));
+    float4 G = imageLoad(i, clamp(uv,                int2(0), image_size - int2(1)));
     float4 H = imageLoad(i, clamp(uv + int2( 2,  0), int2(0), image_size - int2(1)));
     float4 I = imageLoad(i, clamp(uv + int2(-1,  1), int2(0), image_size - int2(1)));
     float4 J = imageLoad(i, clamp(uv + int2( 1,  1), int2(0), image_size - int2(1)));
@@ -368,17 +389,17 @@ float4 DownsampleBox13WithKarisAverage(readonly image2D i, int2 uv, int2 image_s
 
 // [Jimenez14] https://www.iryoku.com/next-generation-post-processing-in-call-of-duty-advanced-warfare/
 float4 UpsampleTent9(sampler2D s, float2 uv, float2 texel_size) {
-    float4 A = texture(s, uv + float2(-texel_size.x,  texel_size.y));
-    float4 B = texture(s, uv + float2(            0,  texel_size.y));
-    float4 C = texture(s, uv + float2( texel_size.x,  texel_size.y));
+    float4 A = textureLod(s, uv + float2(-texel_size.x,  texel_size.y), 0);
+    float4 B = textureLod(s, uv + float2(            0,  texel_size.y), 0);
+    float4 C = textureLod(s, uv + float2( texel_size.x,  texel_size.y), 0);
 
-    float4 D = texture(s, uv + float2(-texel_size.x,  0));
-    float4 E = texture(s, uv);
-    float4 F = texture(s, uv + float2( texel_size.x,  0));
+    float4 D = textureLod(s, uv + float2(-texel_size.x,  0), 0);
+    float4 E = textureLod(s, uv, 0);
+    float4 F = textureLod(s, uv + float2( texel_size.x,  0), 0);
 
-    float4 G = texture(s, uv + float2(-texel_size.x, -texel_size.y));
-    float4 H = texture(s, uv + float2(            0, -texel_size.y));
-    float4 I = texture(s, uv + float2( texel_size.x, -texel_size.y));
+    float4 G = textureLod(s, uv + float2(-texel_size.x, -texel_size.y), 0);
+    float4 H = textureLod(s, uv + float2(            0, -texel_size.y), 0);
+    float4 I = textureLod(s, uv + float2( texel_size.x, -texel_size.y), 0);
 
     // Apply weighted distribution, by using a 3x3 tent filter:
     //  1   | 1 2 1 |
@@ -398,7 +419,7 @@ float4 UpsampleTent9(readonly image2D i, int2 uv, int2 image_size) {
     float4 C = imageLoad(i, clamp(uv + int2( 1,  1), int2(0), image_size - int2(1)));
 
     float4 D = imageLoad(i, clamp(uv + int2(-1,  0), int2(0), image_size - int2(1)));
-    float4 E = imageLoad(i, clamp(uv, int2(0), image_size - int2(1)));
+    float4 E = imageLoad(i, clamp(uv,                int2(0), image_size - int2(1)));
     float4 F = imageLoad(i, clamp(uv + int2( 1,  0), int2(0), image_size - int2(1)));
 
     float4 G = imageLoad(i, clamp(uv + int2(-1, -1), int2(0), image_size - int2(1)));
@@ -418,10 +439,10 @@ float4 UpsampleTent9(readonly image2D i, int2 uv, int2 image_size) {
 }
 
 float4 SampleBox4(sampler2D s, float2 uv, float2 texel_size) {
-    float4 A = texture(s, uv + float2(-texel_size.x,  texel_size.y));
-    float4 B = texture(s, uv + float2( texel_size.x,  texel_size.y));
-    float4 C = texture(s, uv + float2(-texel_size.x, -texel_size.y));
-    float4 D = texture(s, uv + float2( texel_size.x, -texel_size.y));
+    float4 A = textureLod(s, uv + float2(-texel_size.x,  texel_size.y), 0);
+    float4 B = textureLod(s, uv + float2( texel_size.x,  texel_size.y), 0);
+    float4 C = textureLod(s, uv + float2(-texel_size.x, -texel_size.y), 0);
+    float4 D = textureLod(s, uv + float2( texel_size.x, -texel_size.y), 0);
 
     return (A + B + C + D) * (1 / 4.0);
 }
@@ -445,6 +466,55 @@ float3 BlendRGBPostMultipliedAlpha(float3 dst, float3 src, float alpha) {
 
 float3 BlendRGBPreMultipliedAlpha(float3 dst, float3 src, float alpha) {
     return src + dst * (1 - alpha);
+}
+
+float2 IntegerToNormalizedTexCoords(int2 integer_coords, int2 size) {
+    return float2((integer_coords + float2(0.5)) / float2(size));
+}
+
+// Inspired by https://lisyarus.github.io/blog/posts/point-light-attenuation.html, tweaked to match closely I/x^2
+// Key differences:
+//  * instead of smoothly settling as x < source_radius, we cut abruptly because physically nothing is supposed to be closer than source_radius
+//  * the intensity parameter is not the max intensity at distance == 0, rather it tries to match closely I in the physically correct equation
+//  * there is no parameter for the falloff, it is calculated automatically depending on the intensity_radius
+// Parameters:
+//  * source_radius: light sources are not infinitely small points; this describes to size of the light source as if it were a sphere.
+// The lower it is, the closer objects need to be to the light source to receive a lot of light
+//  * base_intensity: the same parameter as the physically correct equation, this is NOT the intensity at distance == 0
+//  * intensity_radius: the distance at which the final intensity reaches 0, offseted by the source_radius
+// https://www.desmos.com/calculator/4fs7w3qt2x
+float GetPointLightIntensity(float source_radius, float base_intensity, float intensity_radius, float distance) {
+    if (distance > source_radius + intensity_radius) {
+        return 0;
+    }
+
+    const float Intensity_Factor = 100.0;
+
+    source_radius = max(source_radius, 0);
+    float max_intensity = Intensity_Factor * base_intensity;
+    float d = max(distance - source_radius, 0);
+    float s = d / intensity_radius;
+    float falloff = Intensity_Factor * intensity_radius;
+    float one_minus_s_s = 1 - s * s;
+
+    return max_intensity * (one_minus_s_s * one_minus_s_s) / (1 + falloff * s);
+}
+
+uint GetLightClusterIndex(Viewpoint viewpoint, float3 world_position, float2 screen_position) {
+    float3 view_space_position = (viewpoint.view * float4(world_position, 1)).xyz;
+    float depth = abs(view_space_position.z);
+    uint cluster_z_tile = uint((log(depth / viewpoint.z_near) * Num_Clusters_Z) / log(viewpoint.z_far / viewpoint.z_near));
+    float2 cluster_tile_size = viewpoint.viewport_size / float2(Num_Clusters_X, Num_Clusters_Y);
+    uint3 cluster_tile = uint3(screen_position / cluster_tile_size, cluster_z_tile);
+    cluster_tile.y = Num_Clusters_Y - cluster_tile.y - 1;
+
+    return cluster_tile.x
+        + (cluster_tile.y * Num_Clusters_X)
+        + (cluster_tile.z * Num_Clusters_X * Num_Clusters_Y);
+}
+
+float Log10(float x) {
+    return log(x) / 2.30258509299;
 }
 
 #endif

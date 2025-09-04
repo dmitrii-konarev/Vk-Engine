@@ -1,5 +1,7 @@
 #import "Lexer";
 
+// @Todo: create components upon deserializing, so entities can have null components
+
 Detect_Infinite_Type_Recursion :: true; // @PossibleOptimization
 Panic_On_Infinite_Type_Recursion :: false; // @PossibleOptimization
 
@@ -12,6 +14,24 @@ Serializer :: struct {
 
 IsTypeSerializable :: (type : *Type_Info, dependency_stack : *[..]*Type_Info = null) -> bool {
     type = Devariantize(type);
+
+    if type == type_info(Vec2f)
+    || type == type_info(Vec3f)
+    || type == type_info(Vec4f)
+    || type == type_info(Quatf) {
+        return true;
+    }
+
+    if type == type_info(Math.Vector2)
+    || type == type_info(Math.Vector3)
+    || type == type_info(Math.Vector4)
+    || type == type_info(Math.Quaternion) {
+        return true;
+    }
+
+    if type == type_info(EntityGUID) {
+        return true;
+    }
 
     if type.runtime_size <= 0 {
         return false;
@@ -76,7 +96,7 @@ IsTypeSerializable :: (type : *Type_Info, dependency_stack : *[..]*Type_Info = n
         }
 
         for struct_info.members {
-            if !(it.flags & .CONSTANT) && IsTypeSerializable(it.type, dependency_stack) {
+            if !(it.flags & .CONSTANT) && GetSerializeFieldId(it.notes) > 0 && IsTypeSerializable(it.type, dependency_stack) {
                 return true;
             }
         }
@@ -419,7 +439,6 @@ DeserializeParser :: struct {
     line_index : int;
     byte_index : int;
     indent_level : int;
-    has_mismatching_version : bool;
 }
 
 DeserializeResult :: struct {

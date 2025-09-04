@@ -3,6 +3,28 @@
 #ifndef SHADER_TYPES_GENERATED_GLSL
 #define SHADER_TYPES_GENERATED_GLSL
 
+#define BRDF_LUT_Compute_Work_Group_Size 16
+#define Bloom_Compute_Work_Group_Size 16
+#define Kawase_Bur_Compute_Work_Group_Size 16
+#define Max_Lights_Per_Clusters 100
+#define Max_Point_Shadow_Maps 20
+#define Max_Shadow_Maps 2
+#define Max_Viewpoints 6
+#define Num_Clusters 3456
+#define Num_Clusters_X 16
+#define Num_Clusters_Y 9
+#define Num_Clusters_Z 24
+#define Num_Environment_Map_Levels 6
+#define Num_Point_Shadow_Map_Cbrt_Samples 3
+#define Num_Point_Shadow_Map_Samples 27
+#define Num_Shadow_Map_Cascades 4
+#define Num_Shadow_Map_Samples 64
+#define Num_Shadow_Map_Sqrt_Samples 8
+#define Populate_Cluster_Grid_Work_Group_Size 144
+#define Reverse_Depth_Range 1
+#define Shadow_Map_Noise_Size 32
+#define Shadow_Map_Reverse_Depth_Range 1
+
 struct BloomParams {
     float resolution_factor;
     float brightness_threshold;
@@ -25,7 +47,9 @@ struct Viewpoint {
     float4x4 transform;
     float4x4 view;
     float4x4 projection;
+    float4x4 inv_projection;
     float4x4 view_projection;
+    float4x4 inv_view_projection;
     float2 viewport_size;
     float fov;
     float z_near;
@@ -42,6 +66,27 @@ struct DirectionalLight {
     Viewpoint shadow_map_viewpoints[4];
 };
 
+struct EditorBackgroundBlurSettings {
+    bool enabled;
+    float resolution_factor;
+    int num_iterations;
+};
+
+struct EditorColors {
+    float4 emphasis_button;
+    float4 emphasis_button_hovered;
+    float4 emphasis_button_active;
+    float4 submit_good_button;
+    float4 submit_good_button_hovered;
+    float4 submit_good_button_active;
+    float4 submit_bad_button;
+    float4 submit_bad_button_hovered;
+    float4 submit_bad_button_active;
+    float4 cancel_button;
+    float4 cancel_button_hovered;
+    float4 cancel_button_active;
+};
+
 struct EntityOutlineParams {
     float thickness;
     float covered_alpha;
@@ -50,9 +95,8 @@ struct EntityOutlineParams {
 
 struct EditorSettings {
     EntityOutlineParams entity_outline;
-    bool use_blur_effect;
-    float blur_effect_resolution_factor;
-    int blur_effect_iterations;
+    EditorBackgroundBlurSettings background_blur;
+    EditorColors colors;
 };
 
 struct ShadowMapParams {
@@ -94,12 +138,20 @@ struct GizmoWidget {
     bool shaded;
 };
 
+struct LightCluster {
+    float3 min;
+    float3 max;
+    uint num_lights;
+    uint lights[100];
+};
+
 #define MaterialFlags int
 #define MaterialFlags_HasMetallicRoughness 1
 #define MaterialFlags_HasDepthMap 2
 
 #define MaterialType int
 #define MaterialType_Opaque 0
+#define MaterialType_Unlit 1
 
 struct MaterialPerInstance {
     MaterialType type;
@@ -110,6 +162,7 @@ struct MaterialPerInstance {
     float3 emissive_tint;
     float emissive_strength;
     float depth_map_scale;
+    float alpha_cutoff;
 };
 
 struct MeshInstance {
@@ -117,15 +170,23 @@ struct MeshInstance {
     float4x4 transform;
     float3x3 normal_transform;
     MaterialPerInstance material;
+    uint skinning_matrices_offset;
 };
 
 struct PointLight {
     float3 position;
     float3 color;
     float intensity;
+    float intensity_radius;
+    float source_radius;
     int shadow_map_index;
     uint shadow_map_resolution;
     Viewpoint shadow_map_viewpoints[6];
+};
+
+struct ViewpointsData {
+    uint num_viewpoints;
+    Viewpoint viewpoints[6];
 };
 
 #endif

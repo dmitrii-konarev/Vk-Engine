@@ -77,6 +77,9 @@ float ParallaxOcclusionSelfShadow(sampler2D depth_map, float height_scale, float
 
 void main() {
     MeshInstance mesh = u_mesh_instances[in_instance_index];
+    Viewpoint viewpoint = u_viewpoints[0];
+
+    float3 view_space_position = (viewpoint.view * float4(in_position, 1)).xyz;
 
     float3x3 TBN = float3x3(
         normalize(in_tangent),
@@ -116,6 +119,9 @@ void main() {
     metallic = clamp(metallic, 0, 1);
     roughness = clamp(roughness, 0, 1);
 
+    uint cluster_index = GetLightClusterIndex(viewpoint, in_position, gl_FragCoord.xy);
+    LightCluster cluster = u_clusters[cluster_index];
+
     float3 Lo = float3(0);
 
     for (int i = 0; i < u_frame_info.num_directional_lights; i += 1) {
@@ -140,7 +146,7 @@ void main() {
             } else {
                 shadow *= 1 - ParallaxOcclusionSelfShadow(u_depth_map_texture, mesh.material.depth_map_scale, tex_coords, tangent_light_dir);
 
-                // Shadow don't look goot at steep angles, so we attenuate
+                // Shadow don't look good at steep angles, so we attenuate
                 float shadow_attenuation = InverseLerp(0, Parallax_Shadow_Attenuation_Cos_Angle, dot(in_normal, L));
                 shadow_attenuation = clamp(shadow_attenuation, 0, 1);
                 shadow *= shadow_attenuation;
@@ -150,8 +156,12 @@ void main() {
         Lo += CalculateBRDF(base_color, metallic, roughness, N, V, L, light_color * light.intensity * shadow);
     }
 
-    for (int i = 0; i < u_frame_info.num_point_lights; i += 1) {
-        PointLight light = u_point_lights[i];
+    // out_color = float4(cluster.num_lights / float(Max_Lights_Per_Clusters), 0, 0, 1);
+    // return;
+
+    for (uint i = 0; i < cluster.num_lights; i += 1) {
+        uint light_index = cluster.lights[i];
+        PointLight light = u_point_lights[light_index];
         float3 light_color = sRGBToLinear(light.color);
 
         float3 L = light.position - in_position;
@@ -159,7 +169,7 @@ void main() {
         float distance = sqrt(distance_sqrd);
         L /= distance;
 
-        float intensity = light.intensity / distance_sqrd;
+        float intensity = GetPointLightIntensity(light.source_radius, light.intensity, light.intensity_radius, distance);
 
         float shadow;
         if (light.shadow_map_index >= 0) {
@@ -171,7 +181,7 @@ void main() {
         if ((mesh.material.flags & MaterialFlags_HasDepthMap) != 0) {
             float3 tangent_light_dir = inv_TBN * L;
 
-            // Remove all light contribution when the light is behind the plane (we assume depth map materials are mostly applied on flat surfaces)
+            // Remove all light contribution when the light is behind the plane
             if (dot(in_normal, L) < 0) {
                 shadow = 0;
             } else {
@@ -183,7 +193,7 @@ void main() {
                 // visible with self shadowing
                 shadow *= 1 - ParallaxOcclusionSelfShadow(u_depth_map_texture, mesh.material.depth_map_scale, tex_coords, tangent_light_dir);
 
-                // Shadow don't look goot at steep angles, so we attenuate
+                // Shadow don't look good at steep angles, so we attenuate
                 float shadow_attenuation = InverseLerp(0, Parallax_Shadow_Attenuation_Cos_Angle, dot(in_normal, L));
                 shadow_attenuation = clamp(shadow_attenuation, 0, 1);
                 shadow *= shadow_attenuation;

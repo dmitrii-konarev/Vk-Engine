@@ -63,10 +63,10 @@ class EmptyEntity(Entity):
     def WriteToFile(self, file):
         super().WriteToFile(file)
 
-class MeshEntity(Entity):
+class StaticMeshEntity(Entity):
     def __init__(self):
         super().__init__()
-        self.type = 'MeshEntity'
+        self.type = 'StaticMeshEntity'
         self.mesh_name : str = ""
         self.material_name : str = ""
         self.cast_shadows : bool = True
@@ -76,13 +76,15 @@ class MeshEntity(Entity):
 
         fw = file.write
 
+        fw(f"@mesh 2:\n")
+
         if len(self.mesh_name) > 0:
-            fw(f"@mesh 2: \"{self.mesh_name}\"\n")
+            fw(f"  @mesh 2: \"{self.mesh_name}\"\n")
 
         if len(self.material_name) > 0:
-            fw(f"@material 3: \"{self.material_name}\"\n")
+            fw(f"  @material 3: \"{self.material_name}\"\n")
 
-        fw(f"@cast_shadows 4: {self.cast_shadows}\n")
+        fw(f"  @cast_shadows 4: {self.cast_shadows}\n")
 
 class PointLightEntity(Entity):
     def __init__(self):
@@ -96,9 +98,10 @@ class PointLightEntity(Entity):
         super().WriteToFile(file)
 
         fw = file.write
-        fw(f"@color 2: [{self.light_color[0]}, {self.light_color[1]}, {self.light_color[2]}]\n")
-        fw(f"@intensity 3: {self.light_intensity}\n")
-        fw(f"@cast_shadows 4: {self.cast_shadows}\n")
+        fw(f"@light 2:\n")
+        fw(f"  @color 2: [{self.light_color[0]}, {self.light_color[1]}, {self.light_color[2]}]\n")
+        fw(f"  @intensity 3: {self.light_intensity}\n")
+        fw(f"  @cast_shadows 4: {self.cast_shadows}\n")
 
 class DirectionalLightEntity(Entity):
     def __init__(self):
@@ -112,9 +115,10 @@ class DirectionalLightEntity(Entity):
         super().WriteToFile(file)
 
         fw = file.write
-        fw(f"@color 2: [{self.light_color[0]}, {self.light_color[1]}, {self.light_color[2]}]\n")
-        fw(f"@intensity 3: {self.light_intensity}\n")
-        fw(f"@cast_shadows 4: {self.cast_shadows}\n")
+        fw(f"@light 2:\n")
+        fw(f"  @color 2: [{self.light_color[0]}, {self.light_color[1]}, {self.light_color[2]}]\n")
+        fw(f"  @intensity 3: {self.light_intensity}\n")
+        fw(f"  @cast_shadows 4: {self.cast_shadows}\n")
 
 def EntityFromBlenderObject(
     context : bpy.types.Context,
@@ -125,7 +129,7 @@ def EntityFromBlenderObject(
 ):
     entity = None
 
-    options = context.scene.engine_entities_export_options
+    options = context.scene.vk_engine_entities_export_options
 
     if obj.type == 'EMPTY':
         entity = EmptyEntity()
@@ -136,7 +140,7 @@ def EntityFromBlenderObject(
         filename = f"{filename}.mesh"
         filename = os.path.join(bpy.path.abspath(options.meshes_directory), filename)
 
-        entity = MeshEntity()
+        entity = StaticMeshEntity()
         entity.mesh_name = utils.GetAssetName(filename)
 
         if len(obj.material_slots) > 0:
@@ -226,16 +230,16 @@ class EntitiesExportOptions(bpy.types.PropertyGroup):
         default = True
     )
 
-class EXPORTER_OT_EngineEntities(bpy.types.Operator):
-    bl_idname = "export.engine_scene"
-    bl_label = "Export Vk Scene (.scene)"
-    bl_description = "Export Vk Scene (.scene)"
-    bl_options = { 'REGISTER', 'UNDO' }
+class EXPORTER_OT_VkEngineEntities(bpy.types.Operator):
+    bl_idname = "export.vk_engine_scene"
+    bl_label = "Export Vk-Engine scene (.scene)"
+    bl_description = "Export Vk-Engine scene (.scene)"
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context : bpy.types.Context):
         context.window.cursor_set('WAIT')
 
-        options = context.scene.engine_entities_export_options
+        options = context.scene.vk_engine_entities_export_options
 
         objects : List[bpy.types.Object] = []
         if options.only_selected:
@@ -288,18 +292,18 @@ class EXPORTER_OT_EngineEntities(bpy.types.Operator):
 
         context.window.cursor_set('DEFAULT')
 
-        return { 'FINISHED' }
+        return {'FINISHED'}
 
-class VIEW3D_PT_EngineEntitiesExport(bpy.types.Panel):
+class VIEW3D_PT_VkEngineEntitiesExport(bpy.types.Panel):
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
 
-    bl_category = "Vk Engine Tools"
-    bl_label = "Export Entities"
+    bl_category = "Vk-Engine Tools"
+    bl_label = "Export Entitie(s)"
 
     def draw(self, context : bpy.types.Context):
         layout = self.layout
-        options = context.scene.engine_entities_export_options
+        options = context.scene.vk_engine_entities_export_options
 
         layout.row().prop(options, "only_selected")
         layout.row().prop(options, "coordinate_system")
@@ -313,11 +317,11 @@ class VIEW3D_PT_EngineEntitiesExport(bpy.types.Panel):
 
         row = layout.row()
         row.enabled = valid
-        row.operator(EXPORTER_OT_EngineEntities.bl_idname, text="Export Entities")
+        row.operator(EXPORTER_OT_VkEngineEntities.bl_idname, text="Export Entitie(s)")
 
 classes = (
-    VIEW3D_PT_EngineEntitiesExport,
-    EXPORTER_OT_EngineEntities,
+    VIEW3D_PT_VkEngineEntitiesExport,
+    EXPORTER_OT_VkEngineEntities,
     EntitiesExportOptions,
 )
 
@@ -325,7 +329,7 @@ def register():
     for cl in classes:
         bpy.utils.register_class(cl)
 
-    bpy.types.Scene.engine_entities_export_options = PointerProperty(type=EntitiesExportOptions)
+    bpy.types.Scene.vk_engine_entities_export_options = PointerProperty(type=EntitiesExportOptions)
 
 def unregister():
     for cl in classes:
