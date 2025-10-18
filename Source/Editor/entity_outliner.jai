@@ -1,45 +1,17 @@
-g_show_entity_outliner := true;
+EntityOutlinerState :: struct {
+    opened := false; @Serialize(1)
 
-g_editor_selected_entities : [..]EntityGUID;
-g_editor_entity_filter_text : [100]u8;
-g_editor_entity_filter_case_sensitive : bool;
-
-DeselectEntity :: (entity : EntityGUID) {
-    index := ArrayFindFirst(g_editor_selected_entities, entity);
-    if index >= 0 {
-        ArrayRemove(*g_editor_selected_entities, index);
-    }
+    filter_text : [100]u8; @Serialize(2)
+    filter_case_sensitive : bool; @Serialize(3)
 }
 
-SelectEntity :: (entity : EntityGUID, add_to_selection := false, focus := true) {
-    if !add_to_selection {
-        ArrayClear(*g_editor_selected_entities);
-    }
+g_entity_outliner : EntityOutlinerState;
 
-    if entity != Null_Entity_GUID {
-        ArrayPushUnique(*g_editor_selected_entities, entity);
-    }
+EditorCopyEntityGUID :: inline (guid : EntityGUID) {
+    g_editor_last_copied_entity_guid = guid;
+    g_editor_has_copied_entity_guid = true;
 
-    if focus {
-        ImGui.FocusWindow(null);
-    }
-}
-
-EntityIsSelected :: inline (entity : EntityGUID) -> bool {
-    return ArrayFindFirst(g_editor_selected_entities, entity) != -1;
-}
-
-EntityOrParentIsSelected :: (world : *World, entity : EntityGUID) -> bool {
-    e := GetEntity(world, entity);
-    while e {
-        if EntityIsSelected(e.guid) {
-            return true;
-        }
-
-        e = GetEntity(world, e.parent);
-    }
-
-    return false;
+    SDL_SetClipboardText(CTPrint("%", guid));
 }
 
 EditorDeleteEntity :: (world : *World, guid : EntityGUID) {
@@ -193,34 +165,34 @@ GetNiceComponentTypeName :: (type_id : ComponentTypeId) -> string {
 }
 
 ShowEntityOutliner :: (world : *World) {
-    if !g_show_entity_outliner {
+    if !g_entity_outliner.opened {
         return;
     }
 
     defer ImGui.End();
 
     ImGui.SetNextWindowSize(.{350, 700}, .FirstUseEver);
-    if !ImGui.Begin("Entity Outliner", *g_show_entity_outliner) {
+    if !ImGui.Begin("Entity Outliner", *g_entity_outliner.opened) {
         return;
     }
 
-    ImGui.InputText("Filter", g_editor_entity_filter_text.data, xx g_editor_entity_filter_text.count);
+    ImGui.InputText("Filter", g_entity_outliner.filter_text.data, xx g_entity_outliner.filter_text.count);
     ImGui.SameLine();
-    Toggle("Aa", *g_editor_entity_filter_case_sensitive);
+    Toggle("Aa", *g_entity_outliner.filter_case_sensitive);
 
-    ImGui.SetItemTooltip(ifx g_editor_entity_filter_case_sensitive
+    ImGui.SetItemTooltip(ifx g_entity_outliner.filter_case_sensitive
         then "Disable case sensitive filter"
         else "Enable case sensitive filter"
     );
 
     ImGui.PushFont(g_editor_medium_font);
     PushButtonColor(.EmphasisButton);
-    ImGui.SetNextItemWidth(-1);
-    if ImGui.BeginCombo("###create_new_entity", "Create New Entity") {
+    if BeginButtonCombo("Add Entity", size=.{-1,0}) {
         defer ImGui.EndCombo();
 
         ImGui.PushFont(g_editor_base_font);
         defer ImGui.PopFont();
+
         for i : 1..Entity_Types.count - 1 {
             type_id := cast(EntityTypeId, i);
             name := GetNiceEntityTypeName(type_id);
@@ -234,15 +206,10 @@ ShowEntityOutliner :: (world : *World) {
     PopButtonColor();
     ImGui.PopFont();
 
-    defer ImGui.EndChild();
-    if !ImGui.BeginChild("Outliner", child_flags=.Border, window_flags=.HorizontalScrollbar) {
-        return;
-    }
-
     EntityGUIDSet :: HashSet(
         EntityGUID,
         hash_func = HashEntityGUID,
-        comp_func = (a, b) => a == b
+        comp_func = CompareEntityGUIDs
     );
 
     already_shown_entities : EntityGUIDSet;
@@ -255,7 +222,7 @@ ShowEntityOutliner :: (world : *World) {
             child := GetEntity(world, it);
             VisitEntity(world, child, already_shown_entities);
         }
-    }
+    } @NoProfile
 
     ShowEntity :: (world : *World, entity : *Entity, already_shown_entities : *EntityGUIDSet) {
         if HashSetGetPtr(already_shown_entities, entity.guid) {
@@ -264,11 +231,9 @@ ShowEntityOutliner :: (world : *World) {
 
         HashSetInsert(already_shown_entities, entity.guid);
 
-        label := ifx entity.name
-            then CStringClone(entity.name ,, Temp)
-            else CTPrint("<%>##%", GetNiceEntityTypeName(entity), entity.guid);
+        label := CTPrint("%##%", ifx entity.name then entity.name else "Unnamed", entity.guid);
 
-        flags := ImGui.TreeNodeFlags.OpenOnArrow | .SpanFullWidth;
+        flags := ImGui.TreeNodeFlags.OpenOnArrow | .SpanFullWidth | .SpanAllColumns;
         if entity.children.count == 0 {
             flags |= .Leaf;
         }
@@ -277,14 +242,27 @@ ShowEntityOutliner :: (world : *World) {
             flags |= .Selected;
         }
 
-        filter := MakeString(g_editor_entity_filter_text.data);
-        pass_filter := FilterTest(g_editor_entity_filter_case_sensitive, entity.name, filter);
-        pass_filter ||= FilterTest(g_editor_entity_filter_case_sensitive, TPrint("%", GetNiceEntityTypeName(entity)), filter);
-        pass_filter ||= FilterTest(g_editor_entity_filter_case_sensitive, TPrint("%", entity.guid), filter);
+        filter := MakeString(g_entity_outliner.filter_text.data);
+        pass_filter := FilterTest(g_entity_outliner.filter_case_sensitive, entity.name, filter);
+        pass_filter ||= FilterTest(g_entity_outliner.filter_case_sensitive, TPrint("%", GetNiceEntityTypeName(entity)), filter);
+        pass_filter ||= FilterTest(g_entity_outliner.filter_case_sensitive, TPrint("%", entity.guid), filter);
 
         opened : bool;
         if pass_filter {
+            ImGui.TableNextRow();
+            ImGui.TableSetColumnIndex(0);
+
+            disabled_color := ImGui.GetColorU32(.TextDisabled);
+            if !entity.name {
+                ImGui.PushStyleColor(.Text, disabled_color);
+            }
+
             opened = ImGui.TreeNodeEx(label, flags);
+
+            if !entity.name {
+                ImGui.PopStyleColor();
+            }
+
             if entity.name {
                 ImGui.SetItemTooltip("<%> % %", GetNiceEntityTypeName(entity), entity.name, entity.guid);
             } else {
@@ -342,6 +320,9 @@ ShowEntityOutliner :: (world : *World) {
 
                 ImGui.EndDragDropTarget();
             }
+
+            ImGui.TableSetColumnIndex(1);
+            ImGui.Text(GetNiceEntityTypeName(entity));
         }
 
         if opened {
@@ -359,13 +340,23 @@ ShowEntityOutliner :: (world : *World) {
                 VisitEntity(world, child, already_shown_entities);
             }
         }
-    }
+    } @NoProfile
 
-    for :AllEntities entity : world {
-        if entity.parent != Null_Entity_GUID {
-            continue;
+    table_flags := ImGui.TableFlags.Resizable | .RowBg | .PadOuterX | .ScrollY;
+    if ImGui.BeginTable("entity_list", 2, table_flags) {
+        defer ImGui.EndTable();
+
+        ImGui.TableSetupColumn("Name", .WidthStretch, 0.6);
+        ImGui.TableSetupColumn("Type", .WidthStretch | .NoResize, 0.4);
+        ImGui.TableSetupScrollFreeze(0, 1); // Keep headers visible when scrolling
+        ImGui.TableHeadersRow();
+
+        for :AllEntities entity : world {
+            if entity.parent != Null_Entity_GUID {
+                continue;
+            }
+
+            ShowEntity(world, entity, *already_shown_entities);
         }
-
-        ShowEntity(world, entity, *already_shown_entities);
     }
 }

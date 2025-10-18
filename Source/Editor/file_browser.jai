@@ -105,7 +105,7 @@ InitBigFileIconsFont :: () {
 
     io := ImGui.GetIO();
 
-    scale_factor := GetWindowScaleFactor(g_window);
+    scale_factor := GetWindowScaleFactor(GetWindow());
     g_big_file_icon_font = io.Fonts.AddFontFromFileTTF(io.Fonts, Font_Icon_Filename_MDI, Font_Size * scale_factor, null, MDI_Ranges.data);
 
     g_big_file_icon_font.Scale = 1 / scale_factor;
@@ -218,6 +218,7 @@ RefreshDirectoryTree :: (using browser : *FileBrowser) {
 
         if show_system_roots || root_directories.count <= 0 {
             #if OS == .WINDOWS {
+                Win32 :: #import "Win32"(File_System=true);
                 drives := Win32.GetLogicalDrives();
                 for i : 0..size_of(u32) - 1 {
                     exists := drives & (1 << i);
@@ -481,7 +482,7 @@ FileBrowserPopup :: (using browser : *FileBrowser) {
         SetDirectory(browser, params.initial_directory);
     }
 
-    window_w, window_h := GetWindowPointSize(g_window);
+    window_w, window_h := GetWindowPointSize(GetWindow());
 
     popup_size := Vec2f.{
         Min(700.0, window_w * 0.8),
@@ -1046,7 +1047,8 @@ FileType :: enum {
     Image;
     Audio;
     Video;
-    MeshOrAnim;
+    Mesh;
+    Animation;
     Material;
     Archive;
     Font;
@@ -1078,8 +1080,10 @@ GetFileTypeString :: (ext : string, directory : bool) -> string {
         return "Audio";
     case .Video;
         return "Video";
-    case .MeshOrAnim;
-        return "";
+    case .Mesh;
+        return "Mesh";
+    case .Animation;
+        return "Animation";
     case .Material;
         return "Material";
     case .Archive;
@@ -1134,10 +1138,13 @@ GetFileType :: (ext : string, directory : bool) -> FileType {
     case "fbx"; #through;
     case "gltf"; #through;
     case "glb"; #through;
-    case "dae"; #through;
-    case "mesh"; #through;
+    case "dae";
+        return .Unknown;
+    case "mesh";
+        return .Mesh;
+
     case "anim";
-        return .MeshOrAnim;
+        return .Animation;
 
     case "mat";
         return .Material;
@@ -1245,7 +1252,9 @@ GetFileIconByType :: (type : FileType) -> string {
         return Icon_File_Music_Outline_MDI;
     case .Video;
         return Icon_File_Video_Outline_MDI;
-    case .MeshOrAnim;
+    case .Mesh;
+        return Icon_File_Outline_MDI;
+    case .Animation;
         return Icon_File_Outline_MDI;
     case .Material;
         return Icon_File_Outline_MDI;
